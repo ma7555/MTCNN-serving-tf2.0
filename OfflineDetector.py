@@ -148,8 +148,13 @@ class Detector(object):
         offset = tf.boolean_mask(roi, mask); # offset.shape = (target num, 4)
         landmarks = tf.boolean_mask(pts, mask); # landmarks.shape = (target num, 10)
         score = tf.expand_dims(tf.boolean_mask(cls_prob, mask), axis = -1); # score.shape = (target num, 1)
-        landmarks = landmarks * tf.concat([tf.tile(wh[...,0:1], (1,5)), tf.tile(wh[...,1:2], (1,5))], axis = -1) + \
-                    tf.concat([tf.tile(boundingbox[...,0:1], (1,5)), tf.tile(boundingbox[...,1:2], (1,5))], axis = -1);
+        landmarks = landmarks * \
+                        tf.concat([
+                            tf.tile(wh[...,0:1], (1,5)), 
+                            tf.tile(wh[...,1:2], (1,5))], axis = -1) + \
+                        tf.concat([
+                            tf.tile(boundingbox[...,0:1], (1,5)), 
+                            tf.tile(boundingbox[...,1:2], (1,5))], axis = -1);
         boundingbox = boundingbox + offset * tf.tile(wh, (1,2));
         rectangles = tf.concat([boundingbox, score, landmarks], axis = -1);
         rectangles = tf.concat(
@@ -206,6 +211,7 @@ class Detector(object):
         boxes = tf.stack([rectangles[...,1], rectangles[...,0], rectangles[...,3], rectangles[...,2]], axis = -1) / tf.constant([h,w,h,w], dtype = tf.float32);
         predict_batch = tf.image.crop_and_resize(inputs, boxes, tf.zeros((rectangles.shape[0],), dtype = tf.int32), (48,48));
         outs = self.onet(predict_batch);
+        # print(outs) (7,2 - 7,4 - 7,10)
         cls_prob = outs[0][...,1];
         offset = outs[1];
         pts = outs[2];
@@ -222,7 +228,9 @@ if __name__ == "__main__":
         print('invalid image!');
         exit(0);
     rectangles = detector.detect(img);
+    
     for rectangle in rectangles:
+        rectangle = tf.cast(rectangle, 'int32')
         upper_left = tuple(rectangle[0:2]);
         down_right = tuple(rectangle[2:4]);
         conf = rectangle[4];
@@ -231,5 +239,5 @@ if __name__ == "__main__":
         cv2.rectangle(img, upper_left, down_right, (0,0,255), 3);
         for landmark in landmarks:
             cv2.circle(img, tuple(landmark), 2, (255,0,0), 2);
-    cv2.imshow('detection', img);
-    cv2.waitKey();
+    cv2.imwrite('detection_offline.jpg', img);
+    # cv2.waitKey();

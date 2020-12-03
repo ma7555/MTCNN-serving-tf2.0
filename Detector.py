@@ -150,8 +150,15 @@ class Detector(object):
         offset = tf.boolean_mask(roi, mask); # offset.shape = (target num, 4)
         landmarks = tf.boolean_mask(pts, mask); # landmarks.shape = (target num, 10)
         score = tf.expand_dims(tf.boolean_mask(cls_prob, mask), axis = -1); # score.shape = (target num, 1)
-        landmarks = landmarks * tf.concat([tf.tile(wh[...,0:1], (1,5)), tf.tile(wh[...,1:2], (1,5))], axis = -1) + \
-                    tf.concat([tf.tile(boundingbox[...,0:1], (1,5)), tf.tile(boundingbox[...,1:2], (1,5))], axis = -1);
+
+        landmarks = landmarks * \
+                        tf.concat([
+                            tf.tile(wh[...,0:1], (1,5)), 
+                            tf.tile(wh[...,1:2], (1,5))], axis = -1) + \
+                        tf.concat([
+                            tf.tile(boundingbox[...,0:1], (1,5)), 
+                            tf.tile(boundingbox[...,1:2], (1,5))], axis = -1)
+
         boundingbox = boundingbox + offset * tf.tile(wh, (1,2));
         rectangles = tf.concat([boundingbox, score, landmarks], axis = -1);
         rectangles = tf.concat(
@@ -181,7 +188,7 @@ class Detector(object):
             ws = int(w * scale);
             resized_img = tf.image.resize(inputs, (hs, ws));
             # send request
-            requests_data = json.dumps({"signature_name": "serving_default", "instances": [{"input_4": np.squeeze(resized_img.numpy()).tolist()}]});
+            requests_data = json.dumps({"signature_name": "serving_default", "instances": resized_img.numpy().tolist()});
             json_response = requests.post("http://" + self.host + ":" + self.ports["pnet"] + "/v1/models/pnet:predict", data = requests_data, headers = self.headers);
             batch_response = json.loads(json_response.text)["predictions"];
             output_blobs = (
@@ -199,16 +206,15 @@ class Detector(object):
             rectangle = self.detect_face_12net(cls_prob, roi, out_side, 1 / scales[i], w, h, threshold[0]);
             rectangles = tf.concat([rectangles, rectangle], axis = 0);
         rectangles = self.NMS(rectangles, 0.7, 'iou');
-        
         if rectangles.shape[0] == 0: return rectangles;
     
         # 2) crop and refine
         boxes = tf.stack([rectangles[...,1], rectangles[...,0], rectangles[...,3], rectangles[...,2]], axis = -1) / tf.constant([h,w,h,w], dtype = tf.float32);
         predict_24_batch = tf.image.crop_and_resize(inputs, boxes, tf.zeros((rectangles.shape[0],), dtype = tf.int32),(24,24));
-        # send request
-        requests_data = json.dumps({"signature_name": "serving_default", "instances": [{"input_3": np.squeeze(predict_24_batch.numpy()).tolist()}]});
+        requests_data = json.dumps({"signature_name": "serving_default", "instances": predict_24_batch.numpy().tolist()})
         json_response = requests.post("http://" + self.host + ":" + self.ports["rnet"] + "/v1/models/rnet:predict", data = requests_data, headers = self.headers);
         batch_response = json.loads(json_response.text)["predictions"];
+        
         outs = (
             tf.constant([response["conv5-1"] for response in batch_response], dtype = tf.float32),
             tf.constant([response["conv5-2"] for response in batch_response], dtype = tf.float32)
@@ -223,13 +229,13 @@ class Detector(object):
         boxes = tf.stack([rectangles[...,1], rectangles[...,0], rectangles[...,3], rectangles[...,2]], axis = -1) / tf.constant([h,w,h,w], dtype = tf.float32);
         predict_batch = tf.image.crop_and_resize(inputs, boxes, tf.zeros((rectangles.shape[0],), dtype = tf.int32), (48,48));
         # send request
-        requests_data = json.dumps({"signature_name": "serving_default", "instances": [{"input_2": np.squeeze(predict_batch.numpy()).tolist()}]});
+        requests_data = json.dumps({"signature_name": "serving_default", "instances": predict_batch.numpy().tolist()});
         json_response = requests.post("http://" + self.host + ":" + self.ports["onet"] + "/v1/models/onet:predict", data = requests_data, headers = self.headers);
         batch_response = json.loads(json_response.text)["predictions"];
         outs = (
-            tf.constant([response["conv6-3"] for response in batch_response], dtype = tf.float32),
             tf.constant([response["conv6-1"] for response in batch_response], dtype = tf.float32),
-            tf.constant([response["conv6-2"] for response in batch_response], dtype = tf.float32)
+            tf.constant([response["conv6-2"] for response in batch_response], dtype = tf.float32),
+            tf.constant([response["conv6-3"] for response in batch_response], dtype = tf.float32)
         );
         cls_prob = outs[0][...,1];
         offset = outs[1];
@@ -242,12 +248,13 @@ if __name__ == "__main__":
     
     assert True == tf.executing_eagerly();
     detector = Detector();
-    img = cv2.imread('tests/faces.jpg');
+    img = cv2.imread('pics/1.png');
     if img is None:
         print('invalid image!');
         exit(0);
-    rectangles = detector.detect(img);
+    rectangles = detector.detect(img)
     for rectangle in rectangles:
+        rectangle = tf.cast(rectangle, 'int32')
         upper_left = tuple(rectangle[0:2]);
         down_right = tuple(rectangle[2:4]);
         conf = rectangle[4];
@@ -256,5 +263,6 @@ if __name__ == "__main__":
         cv2.rectangle(img, upper_left, down_right, (0,0,255), 3);
         for landmark in landmarks:
             cv2.circle(img, tuple(landmark), 2, (255,0,0), 2);
-    cv2.imshow('detection', img);
-    cv2.waitKey();
+    cv2.imwrite('detection_online.jpg', img);
+    # cv2.imshow('detection', img);
+    # cv2.waitKey();
