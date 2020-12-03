@@ -248,7 +248,7 @@ if __name__ == "__main__":
     
     assert True == tf.executing_eagerly();
     detector = Detector();
-    img = cv2.imread('pics/1.png');
+    img = cv2.imread('tests/faces.jpg');
     if img is None:
         print('invalid image!');
         exit(0);
